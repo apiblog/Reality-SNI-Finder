@@ -1,4 +1,4 @@
-from subprocess import check_output, run, CalledProcessError
+from subprocess import check_output, run, CalledProcessError, DEVNULL
 from re import findall
 from pandas import DataFrame
 from tabulate import tabulate
@@ -11,30 +11,33 @@ with open("sni.txt", "r") as my_file:
 # Remove any empty strings from the sni_list
 sni_list = list(filter(None, sni_list))
 
-# Test all the domains in sni.txt file and put the results in a list called result
-result = []
-try:
-    for i in sni_list:
-        x = check_output(f"./tlsping {i}:443", shell=True).rstrip().decode('utf-8')
-        result.append(x)
-except CalledProcessError:
-    pass
+# Test all the domains in sni.txt file and put the results in a dictionary
+domain_ping_dict = {}
 
-# Extract all the avg tlsping values from the domains
-avg_value_list = []
-for j in result:
-    # Use regular expressions to extract the "avg" value
-    avg_value = findall(r"avg/.*?ms.*?(\d+\.?\d*)ms", j )[0]
-    avg_value_list.append(avg_value)
-
-# Create a dictionary with the domain names as keys and the avg values as values
-domain_ping_dict = {sni_list[i]: float(avg_value_list[i]) for i in range(len(sni_list))}
+for domain in sni_list:
+    try:
+        x = check_output(f"./tlsping {domain}:443", shell=True, stderr=DEVNULL).rstrip().decode('utf-8')
+        # Use regular expressions to extract the "avg" value
+        avg_match = findall(r"avg/.*?ms.*?(\d+\.?\d*)ms", x)
+        if avg_match:
+            avg_value = float(avg_match[0])
+            domain_ping_dict[domain] = avg_value
+            print(f"✓ {domain}: {avg_value} ms")
+        else:
+            print(f"✗ {domain}: No avg value found")
+    except CalledProcessError as e:
+        print(f"✗ {domain}: Connection error")
+    except Exception as e:
+        print(f"✗ {domain}: {str(e)}")
 
 # Sort the dictionary by the values in ascending order
 sorted_dict = dict(sorted(domain_ping_dict.items(), key=lambda item: item[1]))
 
 # Convert the sorted dictionary to a pandas DataFrame and print it using tabulate
-df = DataFrame(sorted_dict.items(), columns=['domains', 'pings(ms)'])
-run('clear')
-print(tabulate(df, headers='keys', tablefmt='psql'))
-
+if sorted_dict:
+    df = DataFrame(sorted_dict.items(), columns=['domains', 'pings(ms)'])
+    run('clear', shell=True)
+    print(tabulate(df, headers='keys', tablefmt='psql', showindex=False))
+    print(f"\nTotal successful: {len(sorted_dict)} out of {len(sni_list)} domains")
+else:
+    print("No successful domain tests found")
